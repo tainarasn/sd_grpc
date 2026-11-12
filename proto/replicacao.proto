@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package replicacao;
+
+// ---------------------------------------------------------------
+// Serviço usado pelo CLIENTE (gravação e consulta)
+// ---------------------------------------------------------------
+service ServicoCliente {
+  // Gravação: só o líder aceita. Seguidor/candidato devolve quem é o líder.
+  rpc Gravar (GravarRequest) returns (GravarResponse);
+  // Consulta: qualquer nó responde, usando apenas dados comitados.
+  rpc Ler (LerRequest) returns (LerResponse);
+  // Estado do nó (papel, termo, commit, log) - usado para a demonstração.
+  rpc Estado (EstadoRequest) returns (EstadoResponse);
+}
+
+// ---------------------------------------------------------------
+// Serviço usado ENTRE OS NÓS do cluster (replicação pull + eleição)
+// ---------------------------------------------------------------
+service ServicoReplicacao {
+  // Réplica -> Líder (a cada 100 ms). Busca dados, confirma o que já tem
+  // (último índice/termo) e funciona como heartbeat.
+  rpc Fetch (FetchRequest) returns (FetchResponse);
+  // Candidato -> demais nós.
+  rpc RequestVote (VoteRequest) returns (VoteResponse);
+}
+
+message EntradaLog {
+  int64  indice = 1;
+  int64  termo  = 2;
+  string operacao = 3;   // "SET" ou "NOOP" (entrada que o novo líder grava ao assumir)
+  string chave  = 4;
+  string valor  = 5;
+}
+
+message FetchRequest {
+  int64 termo = 1;             // termo atual da réplica
+  int32 replica_id = 2;
+  int64 ultimo_indice = 3;     // último índice do log da réplica
+  int64 ultimo_termo = 4;      // termo da última entrada do log da réplica
+}
+
+message FetchResponse {
+  int64 termo = 1;             // termo do nó que respondeu
+  bool  sou_lider = 2;         // false => quem respondeu não é o líder
+  int32 lider_id = 3;          // líder conhecido (0 = desconhecido)
+  repeated EntradaLog entradas = 4;   // novas entradas (após ultimo_indice)
+  int64 indice_commit = 5;     // índice de commit do líder
+  bool  divergente = 6;        // true => réplica deve truncar o log
+  int64 truncar_ate = 7;       // manter entradas com índice <= truncar_ate
+}
+
+message VoteRequest {
+  int64 termo = 1;
+  int32 candidato_id = 2;
+  int64 ultimo_indice = 3;
+  int64 ultimo_termo = 4;
+}
+
+message VoteResponse {
+  int64 termo = 1;
+  bool  voto_concedido = 2;
+}
+
+message GravarRequest {
+  string chave = 1;
+  string valor = 2;
+  // Apenas para o Cenário 4B: o líder grava no log local e "cai" (crash)
+  // imediatamente, antes de qualquer réplica buscar a entrada.
+  bool simular_crash = 3;
+}
+
+message GravarResponse {
+  bool   sucesso = 1;
+  string mensagem = 2;
+  int32  lider_id = 3;         // preenchido quando o nó não é o líder
+  string lider_endereco = 4;
+  int64  indice = 5;
+  int64  termo = 6;
+}
+
+message LerRequest {
+  string chave = 1;            // vazio => devolve todos os dados comitados
+}
+
+message LerResponse {
+  bool   encontrado = 1;
+  string valor = 2;
+  map<string, string> dados = 3;
+  int32  no_id = 4;
+  string papel = 5;
+  int64  termo = 6;
+  int64  indice_commit = 7;
+}
+
+message EstadoRequest {}
+
+message InfoReplica {
+  int32 id = 1;
+  int64 indice_confirmado = 2;
+  bool  ativa = 3;
+  double ms_desde_ultimo_fetch = 4;
+}
+
+message EstadoResponse {
+  int32  no_id = 1;
+  string papel = 2;
+  int64  termo = 3;
+  int32  voto_concedido = 4;
+  int32  lider_id = 5;
+  int64  indice_commit = 6;
+  int64  ultimo_indice = 7;
+  repeated EntradaLog log = 8;
+  map<string, string> dados = 9;
+  repeated InfoReplica replicas = 10;   // só preenchido no líder
+}

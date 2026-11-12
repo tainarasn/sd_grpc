@@ -1,0 +1,6 @@
+dados/
+logs/
+__pycache__/
+replicacao_pb2.py
+replicacao_pb2_grpc.py
+*.tmp
